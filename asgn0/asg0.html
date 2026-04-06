@@ -1,0 +1,95 @@
+<!-- CSE 160 - Assignment 0
+Cortney Hernandez
+colehern@ucsc.edu
+This assignment was done with the help of me, the youtuber video listed 
+in the assignment posting, and vibecoded with claude.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>CSE 160 - Assignment 0</title>
+  <style>
+    canvas {
+      display: block;
+      border: 1px solid #444;
+    }
+    .controls {
+      margin-top: 10px;
+    }
+    label {
+      display: inline-block;
+      width: 30px;
+    }
+    input[type="number"] {
+      width: 60px;
+      margin-right: 8px;
+}
+    .row {
+      margin: 6px 0;
+    }
+    button, input[type="button"] {
+      margin-top: 6px;
+      padding: 4px 12px;
+      cursor: pointer;
+    }
+    .section-label {
+      font-weight: bold;
+      margin-top: 10px;
+      display: inline-block;
+    }
+  </style>
+</head>
+<body onload="main()">
+
+  <canvas id="cnv1" width="400" height="400">
+    Please use a browser that supports "canvas"
+  </canvas>
+
+  <!-- Load the matrix library first, then our script -->
+  <script src="lib/cuon-matrix-cse160.js"></script>
+  <script src="asg0.js"></script>
+
+  <div class="controls">
+
+    <!-- V1 and V2 inputs -->
+    <div class="row">
+      <span class="section-label">v1:</span>
+      x <input type="number" id="v1x" value="2.25" step="0.1">
+      y <input type="number" id="v1y" value="2.25" step="0.1">
+    </div>
+    <div class="row">
+      <span class="section-label">v2:</span>
+      x <input type="number" id="v2x" value="-2" step="0.1">
+      y <input type="number" id="v2y" value="1" step="0.1">
+    </div>
+    <div class="row">
+      <input type="button" value="Draw" onclick="handleDrawEvent()">
+    </div>
+
+    <hr style="border-color:#444; margin: 10px 0;">
+
+    <!-- Operation selector -->
+    <div class="row">
+      <span class="section-label">Operation:</span>
+      <select id="op-select">
+        <option value="add">Add</option>
+        <option value="sub">Sub</option>
+        <option value="mul">Mul</option>
+        <option value="div">Div</option>
+        <option value="magnitude">Magnitude</option>
+        <option value="normalize">Normalize</option>
+        <option value="angle">Angle Between</option>
+        <option value="area">Area</option>
+      </select>
+      &nbsp;
+      Scalar: <input type="number" id="scalar" value="1" step="0.1" style="width:55px;">
+    </div>
+    <div class="row">
+      <input type="button" value="Draw" onclick="handleDrawOperationEvent()">
+    </div>
+
+  </div>
+
+</body>
+</html>
