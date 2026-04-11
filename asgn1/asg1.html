@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Assignment 1</title>
+  <script src="lib/cuon-utils.js"></script>
+  <script src="lib/webgl-utils.js"></script>
+  <script src="lib/webgl-debug.js"></script>
+  <script src="asg1.js"></script>
+</head>
+<body onload="main()">
+  <canvas id="webgl" width="400" height="400">
+    Please use a browser that supports Canvas.
+  </canvas>
+  <br>
+  <button onclick="g_shapesList=[]; renderAllShapes()">Clear Canvas</button>
+  <br><br>
+
+  <button onclick="g_selectedType='point'">Points</button>
+  <button onclick="g_selectedType='triangle'">Triangles</button>
+  <button onclick="g_selectedType='square'">Squares</button>
+  <button onclick="g_selectedType='circle'">Circles</button>
+  <br><br>
+
+  Red   <input type="range" id="redSlider"   min="0" max="100" value="10"> 
+  Green <input type="range" id="greenSlider" min="0" max="100" value="10"> 
+  Blue  <input type="range" id="blueSlider"  min="0" max="100" value="100">
+  <br><br>
+
+  Shape Size: <input type="range" id="sizeSlider" min="1" max="100" value="10">
+  &nbsp;&nbsp;
+  Circle Segments: <input type="range" id="segSlider" min="3" max="64" value="12">
+</body>
+</html>
