@@ -1,72 +1,579 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <title>ASG 4 - 3D World</title>
+<head>
+<meta charset="UTF-8">
+<title>3D World</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #fff; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: monospace; }
+  #webgl { display: block; cursor: crosshair; }
+  #hud {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    color: #fff; background: rgba(0,0,0,0.5); padding: 6px 14px;
+    border-radius: 4px; font-size: 12px; letter-spacing: 1px; pointer-events: none;
+  }
+  #crosshair {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    color: white; font-size: 20px; pointer-events: none; text-shadow: 0 0 3px black;
+  }
+  #info {
+    position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+    color: #aaa; font-size: 11px; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="webgl" width="900" height="600"></canvas>
+<div id="hud">W/A/S/D · Q/E turn · Mouse look · F add block · G remove block</div>
+<div id="crosshair">+</div>
+<div id="info">Click canvas to lock mouse</div>
 
-    <!-- Load external libraries first -->
-    <script src="lib/cuon-matrix-cse160.js"></script>
-    <script src="lib/cuon-utils.js"></script>
-    <script src="lib/webgl-debug.js"></script>
-    <script src="lib/webgl-utils.js"></script>
+<script>
+const VSHADER = `
+  attribute vec4 a_Position;
+  attribute vec2 a_TexCoord;
+  attribute vec3 a_Normal;
+  uniform mat4 u_ModelMatrix;
+  uniform mat4 u_ViewMatrix;
+  uniform mat4 u_ProjectionMatrix;
+  varying vec2 v_TexCoord;
+  varying float v_Fog;
+  void main(){
+    vec4 mvPos = u_ViewMatrix * u_ModelMatrix * a_Position;
+    gl_Position = u_ProjectionMatrix * mvPos;
+    v_TexCoord = a_TexCoord;
+    float dist = length(mvPos.xyz);
+    v_Fog = clamp((dist - 10.0) / 30.0, 0.0, 1.0);
+  }
+`;
 
-    <!-- Load geometry -->
-    <script src="geometry/geometry.js"></script>
-    <script src="geometry/cube.js"></script>
+const FSHADER = `
+  precision mediump float;
+  varying vec2 v_TexCoord;
+  varying float v_Fog;
+  uniform sampler2D u_Sampler0;
+  uniform sampler2D u_Sampler1;
+  uniform sampler2D u_Sampler2;
+  uniform int u_TexIndex;
+  uniform float u_TexWeight;
+  uniform vec4 u_BaseColor;
+  uniform bool u_UseFog;
+  void main(){
+    vec4 texColor;
+    if(u_TexIndex == 0)      texColor = texture2D(u_Sampler0, v_TexCoord);
+    else if(u_TexIndex == 1) texColor = texture2D(u_Sampler1, v_TexCoord);
+    else                     texColor = texture2D(u_Sampler2, v_TexCoord);
+    vec4 color = mix(u_BaseColor, texColor, u_TexWeight);
+    if(u_UseFog) color = mix(color, vec4(0.53,0.81,0.98,1.0), v_Fog);
+    gl_FragColor = color;
+  }
+`;
 
-    <!-- Load camera -->
-    <script src="camera.js"></script>
+const MAP = [
+  [4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4],
+  [4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4],
+  [4,0,2,2,0,0,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,0,0,4],
+  [4,0,2,0,0,0,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,4],
+  [4,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,4],
+  [4,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4],
+  [4,0,3,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4],
+  [4,0,3,3,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,3,3,4],
+  [4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4],
+  [4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4],
+  [4,0,0,0,0,4,4,4,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,4,4,0,0,0,4],
+  [4,0,0,0,0,4,0,0,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,0,4,0,0,0,4],
+  [4,0,0,0,0,4,0,0,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,0,4,0,0,0,4],
+  [4,0,0,0,0,4,4,4,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,4,4,0,0,0,4],
+  [4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4],
+  [4,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4],
+  [4,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4],
+  [4,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4],
+  [4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4],
+  [4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4],
+  [4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4],
+  [4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,0,0,0,0,0,0,0,0,0,4],
+  [4,0,0,0,0,0,3,3,3,3,0,0,0,0,0,0,0,0,0,0,2,2,0,0,0,0,0,0,0,0,0,4],
+  [4,0,0,0,0,0,3,0,0,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4],
+  [4,0,0,0,0,0,3,0,0,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4],
+  [4,0,0,0,0,0,3,3,3,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4],
+  [4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,0,0,0,0,0,4],
+  [4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4],
+  [4,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,4],
+  [4,0,2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,4],
+  [4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4],
+  [4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4],
+];
 
-    <!-- Load main -->
-    <script src="asg3.js"></script>
+class Vec3 {
+  constructor(x=0,y=0,z=0){ this.x=x; this.y=y; this.z=z; }
+  clone(){ return new Vec3(this.x,this.y,this.z); }
+  add(v){ return new Vec3(this.x+v.x,this.y+v.y,this.z+v.z); }
+  sub(v){ return new Vec3(this.x-v.x,this.y-v.y,this.z-v.z); }
+  scale(s){ return new Vec3(this.x*s,this.y*s,this.z*s); }
+  dot(v){ return this.x*v.x+this.y*v.y+this.z*v.z; }
+  cross(v){ return new Vec3(this.y*v.z-this.z*v.y, this.z*v.x-this.x*v.z, this.x*v.y-this.y*v.x); }
+  len(){ return Math.sqrt(this.dot(this)); }
+  norm(){ const l=this.len(); return l>0?this.scale(1/l):this.clone(); }
+}
 
-    <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      body {
-        background: #111;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-        height: 100vh;
-        font-family: monospace;
-        color: #ccc;
+class Mat4 {
+  constructor(){ this.e = new Float32Array(16); this.identity(); }
+  identity(){ const e=this.e; for(let i=0;i<16;i++) e[i]=i%5===0?1:0; return this; }
+  static mul(a,b){
+    const r=new Mat4(), ae=a.e, be=b.e, re=r.e;
+    for(let i=0;i<4;i++) for(let j=0;j<4;j++){
+      let s=0; for(let k=0;k<4;k++) s+=ae[i+k*4]*be[k+j*4];
+      re[i+j*4]=s;
+    }
+    return r;
+  }
+  static perspective(fov,asp,near,far){
+    const m=new Mat4(), f=1/Math.tan(fov*Math.PI/360);
+    const e=m.e;
+    e[0]=f/asp; e[5]=f;
+    e[10]=(far+near)/(near-far); e[14]=(2*far*near)/(near-far);
+    e[11]=-1; e[15]=0;
+    return m;
+  }
+  static lookAt(eye,at,up){
+    const f=at.sub(eye).norm();
+    const s=f.cross(up).norm();
+    const u=s.cross(f);
+    const m=new Mat4(), e=m.e;
+    e[0]=s.x; e[4]=s.y; e[8]=s.z; e[12]=-s.dot(eye);
+    e[1]=u.x; e[5]=u.y; e[9]=u.z; e[13]=-u.dot(eye);
+    e[2]=-f.x; e[6]=-f.y; e[10]=-f.z; e[14]=f.dot(eye);
+    e[3]=0; e[7]=0; e[11]=0; e[15]=1;
+    return m;
+  }
+  static translate(x,y,z){
+    const m=new Mat4(), e=m.e;
+    e[12]=x; e[13]=y; e[14]=z;
+    return m;
+  }
+  static scale(x,y,z){
+    const m=new Mat4(), e=m.e;
+    e[0]=x; e[5]=y; e[10]=z;
+    return m;
+  }
+  static rotateY(deg){
+    const m=new Mat4(), r=deg*Math.PI/180, c=Math.cos(r), s=Math.sin(r), e=m.e;
+    e[0]=c; e[8]=s; e[2]=-s; e[10]=c;
+    return m;
+  }
+}
+
+class Camera {
+  constructor(){
+    this.eye = new Vec3(16, 1.7, 16);
+    this.yaw = 0;
+    this.pitch = 0;
+    this.speed = 0.08;
+  }
+  getForward(){
+    const y=this.yaw*Math.PI/180, p=this.pitch*Math.PI/180;
+    return new Vec3(Math.sin(y)*Math.cos(p), Math.sin(p), -Math.cos(y)*Math.cos(p)).norm();
+  }
+  getRight(){
+    const y=this.yaw*Math.PI/180;
+    return new Vec3(Math.cos(y),0,Math.sin(y));
+  }
+  getAt(){ return this.eye.add(this.getForward()); }
+  getViewMatrix(){
+    return Mat4.lookAt(this.eye, this.getAt(), new Vec3(0,1,0));
+  }
+  move(dx,dz){
+    const f=this.getForward(); f.y=0; const fn=f.len()>0?f.scale(1/f.len()):f;
+    const r=this.getRight();
+    const nx=this.eye.x + fn.x*dz + r.x*dx;
+    const nz=this.eye.z + fn.z*dz + r.z*dx;
+    const mx=Math.floor(nx), mz=Math.floor(nz);
+    if(mx>=0&&mx<32&&mz>=0&&mz<32&&MAP[mz][mx]>0) return;
+    this.eye.x=nx; this.eye.z=nz;
+  }
+  pan(d){ this.yaw+=d; }
+  look(dx,dy){ this.yaw+=dx*0.15; this.pitch=Math.max(-80,Math.min(80,this.pitch-dy*0.15)); }
+}
+
+function cubeVertices(){
+  const f=[
+    [[-1,-1, 1,0,0],[1,-1,1,1,0],[1,1,1,1,1],[-1,-1,1,0,0],[1,1,1,1,1],[-1,1,1,0,1]],
+    [[1,-1,-1,0,0],[-1,-1,-1,1,0],[-1,1,-1,1,1],[1,-1,-1,0,0],[-1,1,-1,1,1],[1,1,-1,0,1]],
+    [[-1,-1,-1,0,0],[-1,-1,1,1,0],[-1,1,1,1,1],[-1,-1,-1,0,0],[-1,1,1,1,1],[-1,1,-1,0,1]],
+    [[1,-1,1,0,0],[1,-1,-1,1,0],[1,1,-1,1,1],[1,-1,1,0,0],[1,1,-1,1,1],[1,1,1,0,1]],
+    [[-1,1,1,0,0],[1,1,1,1,0],[1,1,-1,1,1],[-1,1,1,0,0],[1,1,-1,1,1],[-1,1,-1,0,1]],
+    [[-1,-1,-1,0,0],[1,-1,-1,1,0],[1,-1,1,1,1],[-1,-1,-1,0,0],[1,-1,1,1,1],[-1,-1,1,0,1]],
+  ];
+  const verts=[]; for(const face of f) for(const v of face) verts.push(...v);
+  return new Float32Array(verts);
+}
+
+function makeTexture(gl, drawFn){
+  const sz=128, c=document.createElement('canvas'); c.width=c.height=sz;
+  const ctx=c.getContext('2d'); drawFn(ctx,sz);
+  const tex=gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D,tex);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,c);
+  gl.generateMipmap(gl.TEXTURE_2D);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR_MIPMAP_LINEAR);
+  return tex;
+}
+
+// Shared dirt pixel painter — used by wall and ground textures
+function paintDirt(ctx, sz){
+  const P = sz / 16; // pixel size (8px for 128px texture)
+  const palette = [
+    '#7A4F2E','#8B5E3C','#9B6B45','#6B3F1E',
+    '#A07248','#6B3F1E','#7A4F2E','#9B6B45',
+  ];
+  for(let py = 0; py < 16; py++){
+    for(let px = 0; px < 16; px++){
+      ctx.fillStyle = palette[Math.floor(Math.random() * palette.length)];
+      ctx.fillRect(px*P, py*P, P, P);
+    }
+  }
+  // Dark pebble dots
+  for(let i = 0; i < 28; i++){
+    ctx.fillStyle = '#4A2A0E';
+    ctx.fillRect(Math.random()*sz, Math.random()*sz, P*0.6, P*0.6);
+  }
+  // Light speckles
+  for(let i = 0; i < 20; i++){
+    ctx.fillStyle = 'rgba(200,160,100,0.25)';
+    ctx.fillRect(Math.random()*sz, Math.random()*sz, P*0.5, P*0.5);
+  }
+}
+
+// tex0: pure dirt — used on wall sides and as wall texture (heights 1,2,4)
+function makeStoneTexture(ctx, sz){
+  paintDirt(ctx, sz);
+}
+
+// tex1: grass-block side — green top strip + dirt below — used on height-3 walls
+function makeWoodTexture(ctx, sz){
+  paintDirt(ctx, sz);
+  // Green top strip (top 3/16 of texture)
+  const P = sz / 16;
+  const stripH = P * 3;
+  const greenPalette = ['#5EA320','#6BBB25','#4D8C18','#72C828','#55981E'];
+  for(let px = 0; px < 16; px++){
+    for(let py = 0; py < 3; py++){
+      ctx.fillStyle = greenPalette[Math.floor(Math.random()*greenPalette.length)];
+      ctx.fillRect(px*P, py*P, P, P);
+    }
+  }
+  // Thin dark divider between green and dirt
+  ctx.fillStyle = '#3A1F08';
+  ctx.fillRect(0, stripH, sz, P*0.5);
+}
+
+// tex2: grass top — solid green pixel pattern — used on ground plane
+function makeGrassTexture(ctx, sz){
+  const P = sz / 16;
+  const greenPalette = ['#5EA320','#6BBB25','#4D8C18','#72C828','#55981E','#63A81E'];
+  for(let py = 0; py < 16; py++){
+    for(let px = 0; px < 16; px++){
+      ctx.fillStyle = greenPalette[Math.floor(Math.random()*greenPalette.length)];
+      ctx.fillRect(px*P, py*P, P, P);
+    }
+  }
+}
+
+function compileShader(gl, type, src){
+  const s=gl.createShader(type); gl.shaderSource(s,src); gl.compileShader(s);
+  if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)) throw gl.getShaderInfoLog(s);
+  return s;
+}
+function createProgram(gl, vs, fs){
+  const p=gl.createProgram();
+  gl.attachShader(p,compileShader(gl,gl.VERTEX_SHADER,vs));
+  gl.attachShader(p,compileShader(gl,gl.FRAGMENT_SHADER,fs));
+  gl.linkProgram(p);
+  if(!gl.getProgramParameter(p,gl.LINK_STATUS)) throw gl.getProgramInfoLog(p);
+  return p;
+}
+
+const canvas=document.getElementById('webgl');
+const gl=canvas.getContext('webgl');
+if(!gl){ alert('WebGL not supported'); }
+
+gl.enable(gl.DEPTH_TEST);
+gl.enable(gl.CULL_FACE);
+gl.cullFace(gl.BACK);
+
+const prog=createProgram(gl,VSHADER,FSHADER);
+gl.useProgram(prog);
+
+const a_Pos=gl.getAttribLocation(prog,'a_Position');
+const a_UV=gl.getAttribLocation(prog,'a_TexCoord');
+const u_Model=gl.getUniformLocation(prog,'u_ModelMatrix');
+const u_View=gl.getUniformLocation(prog,'u_ViewMatrix');
+const u_Proj=gl.getUniformLocation(prog,'u_ProjectionMatrix');
+const u_TexIdx=gl.getUniformLocation(prog,'u_TexIndex');
+const u_TexW=gl.getUniformLocation(prog,'u_TexWeight');
+const u_BaseColor=gl.getUniformLocation(prog,'u_BaseColor');
+const u_UseFog=gl.getUniformLocation(prog,'u_UseFog');
+
+gl.uniform1i(gl.getUniformLocation(prog,'u_Sampler0'),0);
+gl.uniform1i(gl.getUniformLocation(prog,'u_Sampler1'),1);
+gl.uniform1i(gl.getUniformLocation(prog,'u_Sampler2'),2);
+
+const tex0=makeTexture(gl, makeStoneTexture);
+const tex1=makeTexture(gl, makeWoodTexture);
+const tex2=makeTexture(gl, makeGrassTexture);
+
+gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,tex0);
+gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D,tex1);
+gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D,tex2);
+
+const cubeVerts=cubeVertices();
+const vbo=gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER,vbo);
+gl.bufferData(gl.ARRAY_BUFFER,cubeVerts,gl.STATIC_DRAW);
+const STRIDE=5*4;
+gl.vertexAttribPointer(a_Pos,3,gl.FLOAT,false,STRIDE,0);
+gl.enableVertexAttribArray(a_Pos);
+gl.vertexAttribPointer(a_UV,2,gl.FLOAT,false,STRIDE,3*4);
+gl.enableVertexAttribArray(a_UV);
+
+const projMat=Mat4.perspective(60, canvas.width/canvas.height, 0.05, 200);
+gl.uniformMatrix4fv(u_Proj,false,projMat.e);
+
+const camera=new Camera();
+
+const I=new Mat4();
+function drawCube(modelMat, texIdx, texW, baseColor){
+  gl.uniformMatrix4fv(u_Model,false,modelMat.e);
+  gl.uniform1i(u_TexIdx,texIdx);
+  gl.uniform1f(u_TexW,texW);
+  gl.uniform4fv(u_BaseColor,baseColor);
+  gl.drawArrays(gl.TRIANGLES,0,36);
+}
+
+function setFog(v){ gl.uniform1i(u_UseFog,v?1:0); }
+
+const wallDraws=[];
+function rebuildWalls(){
+  wallDraws.length=0;
+  for(let z=0;z<32;z++){
+    for(let x=0;x<32;x++){
+      const h=MAP[z][x]; if(h===0) continue;
+      const texIdx=h===4?0:h===3?1:0;
+      for(let y=0;y<h;y++){
+        const mat=Mat4.mul(Mat4.translate(x+0.5,y+0.5,z+0.5),Mat4.scale(0.5,0.5,0.5));
+        wallDraws.push({mat,texIdx});
       }
-      #webgl { display: block; cursor: crosshair; }
-      #hud {
-        margin-top: 8px;
-        font-size: 11px;
-        letter-spacing: 1px;
-        color: #555;
-      }
-      #info {
-        position: fixed;
-        top: 10px;
-        left: 50%;
-        transform: translateX(-50%);
-        color: #888;
-        font-size: 11px;
-        pointer-events: none;
-      }
-      #crosshair {
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        color: white;
-        font-size: 18px;
-        pointer-events: none;
-        text-shadow: 0 0 3px black;
-      }
-    </style>
-  </head>
+    }
+  }
+}
+rebuildWalls();
 
-  <body onload="main()">
-    <canvas id="webgl" width="900" height="600">
-      Please use a browser that supports "canvas"
-    </canvas>
-    <div id="hud">W/A/S/D move &nbsp;|&nbsp; Q/E turn &nbsp;|&nbsp; Mouse look (click canvas) &nbsp;|&nbsp; F add block &nbsp;|&nbsp; G remove block</div>
-    <div id="info">Click canvas to lock mouse</div>
-    <div id="crosshair">+</div>
-  </body>
+const groundMat=Mat4.mul(Mat4.translate(16,0,16), Mat4.scale(16,0.02,16));
+const skyMat=Mat4.mul(Mat4.translate(16,0,16), Mat4.scale(500,500,500));
+
+const keys={};
+document.addEventListener('keydown',e=>keys[e.key.toLowerCase()]=true);
+document.addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+
+canvas.addEventListener('click',()=>{ canvas.requestPointerLock(); });
+document.addEventListener('pointerlockchange',()=>{
+  document.getElementById('info').style.display=
+    document.pointerLockElement===canvas?'none':'block';
+});
+document.addEventListener('mousemove',e=>{
+  if(document.pointerLockElement===canvas)
+    camera.look(e.movementX, e.movementY);
+});
+
+document.addEventListener('keydown',e=>{
+  if(e.key.toLowerCase()==='f'){
+    const f=camera.getForward(); f.y=0; const fn=f.norm();
+    const tx=Math.floor(camera.eye.x+fn.x*1.5);
+    const tz=Math.floor(camera.eye.z+fn.z*1.5);
+    if(tx>=0&&tx<32&&tz>=0&&tz<32&&MAP[tz][tx]<4){
+      MAP[tz][tx]++; rebuildWalls();
+    }
+  }
+  if(e.key.toLowerCase()==='g'){
+    const f=camera.getForward(); f.y=0; const fn=f.norm();
+    const tx=Math.floor(camera.eye.x+fn.x*1.5);
+    const tz=Math.floor(camera.eye.z+fn.z*1.5);
+    if(tx>=0&&tx<32&&tz>=0&&tz<32&&MAP[tz][tx]>0){
+      MAP[tz][tx]--; rebuildWalls();
+    }
+  }
+});
+
+// ─── Creeper ──────────────────────────────────────────────────────────────────
+const CREEPER = {
+  x: 24.5, y: 0, z: 24.5, t: 0,
+  moveSpeed: 1.8,
+  yaw: 0,
+  state: 'idle',      // 'idle' | 'chasing' | 'exploding' | 'dead'
+  explodeTimer: 0,    // counts up while exploding
+  explodeDelay: 1.5,  // seconds of hissing before respawn
+  detectionRange: 10,
+  explodeRange: 1.3,
+};
+
+let gameMessage = '';
+let gameMessageTimer = 0;
+
+const C_GREEN   = [0.24, 0.60, 0.24, 1.0];
+const C_DKGREEN = [0.15, 0.40, 0.15, 1.0];
+const C_BLACK   = [0.03, 0.03, 0.03, 1.0];
+const C_WHITE   = [0.90, 0.90, 0.90, 1.0];
+const C_RED     = [0.85, 0.10, 0.10, 1.0];
+
+function drawCreeper(cx, cy, cz, yaw, t, flashing){
+  const legSwing = 0.10 * Math.sin(t * 6);
+  // While exploding, flash between white and green
+  const flash = flashing && Math.floor(t * 10) % 2 === 0;
+  const bodyCol  = flash ? C_WHITE : C_GREEN;
+  const darkCol  = flash ? C_WHITE : C_DKGREEN;
+
+  function part(lx, ly, lz, sx, sy, sz){
+    const ry = Mat4.rotateY(-yaw);
+    const local = Mat4.mul(Mat4.translate(lx, ly, lz), Mat4.scale(sx, sy, sz));
+    return Mat4.mul(Mat4.translate(cx, cy, cz), Mat4.mul(ry, local));
+  }
+
+  // Head
+  drawCube(part(0, 2.3, 0,      0.4,  0.4,  0.4),  0, 0, bodyCol);
+  // Eyes
+  drawCube(part(-0.14, 2.38, 0.41, 0.10, 0.10, 0.01), 0, 0, C_BLACK);
+  drawCube(part( 0.14, 2.38, 0.41, 0.10, 0.10, 0.01), 0, 0, C_BLACK);
+  // Mouth (classic creeper frown)
+  drawCube(part(-0.20, 2.12, 0.41, 0.08, 0.08, 0.01), 0, 0, C_BLACK);
+  drawCube(part( 0.00, 2.12, 0.41, 0.08, 0.08, 0.01), 0, 0, C_BLACK);
+  drawCube(part( 0.20, 2.12, 0.41, 0.08, 0.08, 0.01), 0, 0, C_BLACK);
+  drawCube(part(-0.20, 2.00, 0.41, 0.08, 0.08, 0.01), 0, 0, C_BLACK);
+  drawCube(part( 0.20, 2.00, 0.41, 0.08, 0.08, 0.01), 0, 0, C_BLACK);
+  // Body
+  drawCube(part(0, 1.35, 0,      0.275, 0.35, 0.2),  0, 0, bodyCol);
+  drawCube(part(-0.26, 1.35, 0,  0.02,  0.35, 0.2),  0, 0, darkCol);
+  drawCube(part( 0.26, 1.35, 0,  0.02,  0.35, 0.2),  0, 0, darkCol);
+  // Legs
+  drawCube(part(-0.14, 0.38 + legSwing*0.5, -0.12, 0.11, 0.38, 0.11), 0, 0, bodyCol);
+  drawCube(part( 0.14, 0.38 - legSwing*0.5, -0.12, 0.11, 0.38, 0.11), 0, 0, bodyCol);
+  drawCube(part(-0.14, 0.38 - legSwing*0.5,  0.12, 0.11, 0.38, 0.11), 0, 0, bodyCol);
+  drawCube(part( 0.14, 0.38 + legSwing*0.5,  0.12, 0.11, 0.38, 0.11), 0, 0, bodyCol);
+}
+
+function updateCreeper(dt){
+  const c = CREEPER;
+  c.t += dt;
+
+  if(c.state === 'dead') return;
+
+  const px = camera.eye.x, pz = camera.eye.z;
+  const dx = px - c.x, dz = pz - c.z;
+  const distToPlayer = Math.sqrt(dx*dx + dz*dz);
+
+  if(c.state === 'exploding'){
+    c.explodeTimer += dt;
+    // Keep facing player while hissing
+    c.yaw = Math.atan2(dx, dz) * 180 / Math.PI;
+    if(c.explodeTimer >= c.explodeDelay){
+      // BOOM — caught the player, respawn creeper far away
+      c.state = 'dead';
+      gameMessage = '💥 BOOM! You got blown up! Creeper respawning...';
+      gameMessageTimer = 3.0;
+      setTimeout(()=>{
+        c.x = 24.5; c.z = 24.5;
+        c.state = 'idle';
+        c.explodeTimer = 0;
+      }, 3000);
+    }
+    return;
+  }
+
+  if(c.state === 'idle' && distToPlayer <= c.detectionRange){
+    c.state = 'chasing';
+    gameMessage = '⚠ Creeper spotted you!';
+    gameMessageTimer = 2.0;
+  }
+  if(c.state === 'chasing' && distToPlayer > c.detectionRange * 1.5){
+    c.state = 'idle'; // lost the player
+    gameMessage = 'Creeper lost you...';
+    gameMessageTimer = 1.5;
+  }
+
+  if(c.state === 'chasing'){
+    // Speed up when very close
+    const speed = distToPlayer < 3 ? c.moveSpeed * 1.5 : c.moveSpeed;
+
+    if(distToPlayer <= c.explodeRange){
+      // Close enough — start exploding
+      c.state = 'exploding';
+      c.explodeTimer = 0;
+      gameMessage = '🔥 SSSSSS...';
+      gameMessageTimer = c.explodeDelay + 0.2;
+      return;
+    }
+
+    // Move toward player
+    const nx = c.x + (dx/distToPlayer) * speed * dt;
+    const nz = c.z + (dz/distToPlayer) * speed * dt;
+    const mx = Math.floor(nx), mz = Math.floor(nz);
+    if(mx>=0&&mx<32&&mz>=0&&mz<32&&MAP[mz][mx]===0){
+      c.x = nx; c.z = nz;
+    }
+    c.yaw = Math.atan2(dx, dz) * 180 / Math.PI;
+  }
+}
+
+// ─── Render loop ─────────────────────────────────────────────────────────────
+const hudEl = document.getElementById('hud');
+let last=0;
+function render(ts){
+  const dt=Math.min((ts-last)/1000,0.05); last=ts;
+
+  const spd=keys['shift']?0.12:0.08;
+  if(keys['w']) camera.move(0, spd);
+  if(keys['s']) camera.move(0,-spd);
+  if(keys['a']) camera.move(-spd,0);
+  if(keys['d']) camera.move( spd,0);
+  if(keys['q']) camera.pan(-1.5);
+  if(keys['e']) camera.pan( 1.5);
+
+  camera.eye.y=1.7;
+
+  updateCreeper(dt);
+
+  // Tick message timer
+  if(gameMessageTimer > 0){
+    gameMessageTimer -= dt;
+    hudEl.textContent = gameMessage;
+    if(gameMessageTimer <= 0) hudEl.textContent = 'W/A/S/D · Q/E turn · Mouse look · F add block · G remove block';
+  }
+
+  const viewMat=camera.getViewMatrix();
+  gl.uniformMatrix4fv(u_View,false,viewMat.e);
+
+  gl.clearColor(0.53,0.81,0.98,1);
+  gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+
+  setFog(false);
+  drawCube(skyMat, 0, 0, [0.35,0.60,0.90,1]);
+
+  setFog(true);
+
+  drawCube(groundMat, 2, 0, [0.37,0.72,0.18,1]);
+
+  for(const w of wallDraws){
+    drawCube(w.mat, w.texIdx, 1, [1,1,1,1]);
+  }
+
+  // Draw creeper (skip if dead/mid-respawn)
+  if(CREEPER.state !== 'dead'){
+    const flashing = CREEPER.state === 'exploding';
+    drawCreeper(CREEPER.x, CREEPER.y, CREEPER.z, CREEPER.yaw, CREEPER.t, flashing);
+  }
+
+  requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
+</script>
+</body>
 </html>
